@@ -12,3 +12,18 @@ If everything works nicely there will be two counts for each gear, and ideally, 
 The FFT is drawn last, so its count will match the circle around the perimeter of the gear. Its more-often-than-not correct.
 
 
+## MacOS installation
+
+```shell
+# create new miniconda environment:
+conda create -p $PWD/.venv
+# activate it 
+conda activate $PWD/.venv
+pip install -r requirements.txt
+```
+
+Run via:
+
+```shell
+python3 gearcounter3.py srcfile.jpg
+```
