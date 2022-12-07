@@ -6,6 +6,8 @@ import cv2
 import math
 import numpy as np
 
+#import matplotlib.pyplot as plt
+
 
 class NoGearFoundError(Exception):
     def __init__(self, message):
@@ -15,85 +17,86 @@ class NoGearFoundError(Exception):
 class Gear:
 
     def __init__(self, image, contour):
-        self.image = image
+        self.image   = image
         self.contour = contour
+        
+        # reject contours without the verticies to have atleast 5 teeth
         if len(contour) < 10:
             raise NoGearFoundError("because its got less than 10 points...")
 
         center, radius = cv2.minEnclosingCircle(self.contour)
         self.center_x = int(center[0])
         self.center_y = int(center[1])
-        self.radius = int(radius)
+        self.radius   = int(radius)
 
+        # reject contours which have radii out of our search bounds (tiny or more than half the image size)
         if (self.radius < 15) or (self.radius > 972):
             raise NoGearFoundError(f"because its radius {self.radius} is too ... wrong...", )
 
-        self.hull = cv2.convexHull(self.contour)
+        self.hull          = cv2.convexHull(self.contour)
         convex_hull_length = cv2.arcLength(self.hull, True)
-        circumference = math.pi * 2 * self.radius
-        # the convex hull and the min enclosing circle should have the same circumference
+        circumference      = math.pi * 2 * self.radius
+        
+        # the convex hull and the min enclosing circle should have the same circumference reject if not.
         if convex_hull_length / circumference < 0.9 or convex_hull_length / circumference > 1.1:
-            raise NoGearFoundError(
-                f"ditching non circle length={cv2.arcLength(self.contour, True)} hull={cv2.arcLength(self.hull, True)} c={math.pi * 2 * self.radius}")
+            raise NoGearFoundError(f"ditching non circle length={cv2.arcLength(self.contour, True)} hull={cv2.arcLength(self.hull, True)} c={math.pi * 2 * self.radius}")
+
+
 
     # make greyscale waves of the inside edge of the circle.
     def __make_ring_waves(self):
         intenWave = []
         # image_gray          = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         image_gray = self.image[:, :, 2]  # red channel for white gears
-        color = 255
-        angles = np.linspace(-3.14, 3.14, 512)
+        color      = 255
 
+        # make a smaller copy of the image to work on for some added speed.
         micro_grey = image_gray[
                      self.center_y - self.radius:self.center_y + self.radius,
                      self.center_x - self.radius:self.center_x + self.radius
                      ]
-
         mask = micro_grey.copy()
 
         # cv2.imshow('Binary image', micro_grey)
 
-        p0 = (self.radius * 2 - 5, self.radius)  # middle
+        p0 = (self.radius * 2 - 14, self.radius)  # p0 is a sample point we will rotate around the inside of the circle (15 in from)
         mask[:] = 0
         cv2.circle(mask, (p0[0], p0[1]), 5, color, -1)  # make sample size mask
 
-        maskBase = mask.sum()
-
+        maskBase   = mask.sum()
+        
+        angles  = np.linspace(-3.14, 3.14, 512) # get 512 samples in the circle, this relates to about 256 teeth abs max.
         for a in angles:
-            mask[:] = 0
-            p1 = self.__rotate([p0], a, (self.radius, self.radius))[0]
-            cv2.circle(mask, (int(p1[0]), int(p1[1])), 5, color, -1)  # circle along edge-5pix
-            sample = cv2.bitwise_and(micro_grey, micro_grey, mask=mask)
-            bri = sample.sum() / maskBase
-            intenWave.append(bri * 100)
+            mask[:] = 0                                                 # new mask
+            p1 = self.__rotate([p0], a, (self.radius, self.radius))[0]  # sample point
+            cv2.circle(mask, (int(p1[0]), int(p1[1])), 5, color, -1)    # circle along edge-5pix
+            sample = cv2.bitwise_and(micro_grey, micro_grey, mask=mask) # mask the image for sample
+            bri = sample.sum() / maskBase                               # scale back by the number of pixels that were involved
+            intenWave.append(bri * 100)                                 # adjust value a bit and add to array
 
         # cv2.imshow('Binary image', sample)
         # cv2.waitKey(6000)
 
         return intenWave
 
+
+
     def __fft_tooth_counter(self, curve):
         fft_points = np.array(curve)
-        # delta = []
-        # for i in range(0, len(fft_points)-1):
-        #     delta.append(fft_points[i+1] - fft_points[i])
-        # delta.append(fft_points[0] - fft_points[-1])
-        #
-        # delta = 30 * np.array(delta)
-        # plt.plot(list(range(0, len(delta))), delta)
 
         fft_result = np.fft.fft(fft_points)
-        # ditch the positive fequency values (and the dc value)
-        fft_result = fft_result[0:250]
+        # ditch the positive fequency values (and the dc value) [first half of the 512 samples]
+        fft_result = fft_result[0:256]
 
         # print("Hi!", fft_points)
         # fft_result[0] = 0
 
-        #    plt.plot(list(range(0, len(fft_points))), fft_points)
-        #    plt.show()
+ #       plt.plot(list(range(0, len(fft_points))), fft_points)
+ #       plt.show()
 
         # reduce to amplitudes
         fft_result = abs(fft_result)
+        # we dont count less than 5 teeth, so zero out these (and the DC average)
         fft_result[0] = 0
         fft_result[1] = 0
         fft_result[2] = 0
@@ -105,29 +108,38 @@ class Gear:
 
         # ignore low peaks
         peak = np.max(fft_result)
-        if peak < 500:  # 1200):
+        if peak < 800:  # 1200
             raise NoGearFoundError(f"low FFT amplitude: {peak}")
 
-        print("max is: ", peak)
+        #print("max is: ", peak)
 
-        peaks = [(i, fft_result[i]) for i, item in enumerate(fft_result) if item > peak * 0.5]
+        peaks = [(i, fft_result[i]) for i, item in enumerate(fft_result) if item > peak * 0.75]
         peaks.sort(key=(lambda x: x[1]), reverse=True)
-        if len(peaks) > 4:
-            raise NoGearFoundError(f"too much noise {peaks}")
+        if len(peaks) > 3: # main band with two side bands ok
+            raise NoGearFoundError(f"too much noise {peaks}") # reject noisy results
 
         # inverse fft of the first 4 highest components
-        x = np.linspace(0, math.pi, num=1000, endpoint=False)
+        x = np.linspace(0, math.pi, num=1000, endpoint=False) # reconstruct @ 100 pts
         y = np.cos(x * peaks[0][0]) * peaks[0][1]
         if len(peaks) > 1:
             y = y + np.cos(x * peaks[1][0]) * peaks[1][1]
         if len(peaks) > 2:
             y = y + np.cos(x * peaks[2][0]) * peaks[2][1]
-        if len(peaks) > 3:
-            y = y + np.cos(x * peaks[3][0]) * peaks[3][1]
+       # if len(peaks) > 3:
+       #    y = y + np.cos(x * peaks[3][0]) * peaks[3][1]
+
+ #       plt.plot(list(range(0, len(x))), y)
+ #       plt.show()
 
         # find their number of zero-crossings
         # see https://kitchingroup.cheme.cmu.edu/blog/2013/02/27/Counting-roots/
         self.count = (np.sum(y[0:-2] * y[1:-1] < 0))
+
+        #teeths = list(polar>0)
+        #teeths = [i[0] for i in groupby(teeths)]
+        #if (teeths[0] == teeths[-1]): teeths.pop()
+        #toothCount = sum(teeths)
+
 
         #    print (">>> peaks are: ", fft_result[peaks] , "at", peaks, "<<<<")
         print(f">>> peaks are: {peaks}, teeths={self.count}")
@@ -138,9 +150,13 @@ class Gear:
 
         # plt.show()
 
+
+
     def count_tooths(self):
         curve = self.__make_ring_waves()
         self.__fft_tooth_counter(curve)
+
+
 
     # it looks like the lowest overhead way to do a rotation is with a port of the function from my C library...
     @staticmethod
@@ -154,6 +170,8 @@ class Gear:
             points_out.append((x, y))
         return points_out
 
+
+
     def draw_count(self, drawing):
         font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -161,6 +179,8 @@ class Gear:
         p0 = (self.center_x, self.center_y)
 
         cv2.circle(drawing, p0, int(self.radius), color, 3)  # circle along edge
+        cv2.circle(drawing, p0, int(self.radius)-14, color, 3)  # circle along edge
+        
         cv2.circle(drawing, p0, 20, color, -1)  # filled circle in middle
 
         xf = (p0[0] < 1300)
@@ -172,13 +192,13 @@ class Gear:
         t2 = np.add(p0, [self.radius + 40, 10])
         t3 = np.add(p0, [self.radius + 40, -10])
 
-        if [xf, yf] == [True, True]:  # go right down
+        if [xf, yf] == [True, True]:  # go right & down
             angle = rng.randint(0, 45)
-        if [xf, yf] == [True, False]:  # go right up
+        if [xf, yf] == [True, False]:  # go right & up
             angle = rng.randint(315, 360)
-        if [xf, yf] == [False, True]:  # go left down
+        if [xf, yf] == [False, True]:  # go left & down
             angle = rng.randint(135, 180)
-        if [xf, yf] == [False, False]:  # go left up
+        if [xf, yf] == [False, False]:  # go left & up
             angle = rng.randint(180, 225)
 
         ps = self.__rotate([p1, t1, t2, t3], np.deg2rad(angle), (p0[0], p0[1]))
@@ -188,7 +208,7 @@ class Gear:
             [(int(ps[1][0]), int(ps[1][1])), (int(ps[2][0]), int(ps[2][1])), (int(ps[3][0]), int(ps[3][1]))])
         cv2.drawContours(drawing, [triangle], 0, color, -1)
 
-        # cv2.drawContours(drawing, [self.contour], 0, color, -1)
+       # cv2.drawContours(drawing, [self.contour], 0, color, 2)
 
         p0 = (int(p0[0]), int(p0[1]))
         p1 = (int(p1[0]), int(p1[1]))
@@ -237,7 +257,7 @@ def sort_contours(image, contours):
         except NoGearFoundError as error:
             print(f"Ditching contour {i}: {error.message}")
 
-    # print (len(centers), "Items remaining")
+    print (len(gears), "contours remaining")
     return gears
 
 
@@ -247,7 +267,8 @@ def main():
     if len(sys.argv) > 1:
         file_name = sys.argv[1]
     else:
-        file_name = "foo.jpg"
+        print(f"Please specify a filename to find gears in")
+        return
 
     image = cv2.imread(file_name)
     contours = get_contours(image)
@@ -262,19 +283,23 @@ def main():
             continue
     #
     #   # radii, centers, polar    = unrollContours(radii, centers, contours)
-    #   Iradii, Icens, Icounts   = makeRingWaves(image, radii, centers)
     #
     # #  Aradii, Acens, Acounts   = amplitudeToothCounter(radii, centers, polar)
-    # #  Fradii, Fcens, Fcounts   = fftToothCounter(radii, centers, polar)
-    #   Fradii, Fcens, Fcounts   = fftToothCounter(radii, centers, Icounts)
-    #
-    #   # image = drawCounts(image, Aradii, Acens, Acounts)
-    #   image = drawCounts(image, Fradii, Fcens, Fcounts)
 
-    cv2.imshow('Binary image', cv2.resize(image, (1024, 768)))
+    cv2.imshow('Gear'+file_name, cv2.resize(image, (1024, 768)))
     cv2.imwrite(f'counts_{file_name.split("/")[-1]}', image)
     cv2.waitKey()
     cv2.destroyAllWindows()
 
 
 main()
+
+
+
+
+
+
+
+
+
+
