@@ -6,7 +6,7 @@ import cv2
 import math
 import numpy as np
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 
 class NoGearFoundError(Exception):
@@ -48,51 +48,33 @@ class Gear:
         intenWave = []
         # image_gray          = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         image_gray = self.image[:, :, 2]  # red channel for white gears
-        color      = 255
 
-        # make a smaller copy of the image to work on for some added speed.
-        micro_grey = image_gray[
-                     self.center_y - self.radius:self.center_y + self.radius,
-                     self.center_x - self.radius:self.center_x + self.radius
-                     ]
-        mask = micro_grey.copy()
-
-        # cv2.imshow('Binary image', micro_grey)
-
-        p0 = (self.radius * 2 - 14, self.radius)  # p0 is a sample point we will rotate around the inside of the circle (15 in from)
-        mask[:] = 0
-        cv2.circle(mask, (p0[0], p0[1]), 5, color, -1)  # make sample size mask
-
-        maskBase   = mask.sum()
+        warp_image = cv2.warpPolar(image_gray, (self.radius, 1024), (self.center_x, self.center_y), self.radius, cv2.WARP_POLAR_LINEAR )
+        warp_image = warp_image[0:1024,-25:-1]
         
-        angles  = np.linspace(-3.14, 3.14, 512) # get 512 samples in the circle, this relates to about 256 teeth abs max.
-        for a in angles:
-            mask[:] = 0                                                 # new mask
-            p1 = self.__rotate([p0], a, (self.radius, self.radius))[0]  # sample point
-            cv2.circle(mask, (int(p1[0]), int(p1[1])), 5, color, -1)    # circle along edge-5pix
-            sample = cv2.bitwise_and(micro_grey, micro_grey, mask=mask) # mask the image for sample
-            bri = sample.sum() / maskBase                               # scale back by the number of pixels that were involved
-            intenWave.append(bri * 100)                                 # adjust value a bit and add to array
+        intenWave = warp_image.sum(axis=1)                          # scale back by the number of pixels that were involved
+#        print("bri", intenWave)
+#        cv2.imshow('warp', warp_image)
+#        cv2.waitKey(6000)        
+        
+        
 
-        # cv2.imshow('Binary image', sample)
-        # cv2.waitKey(6000)
 
         return intenWave
 
 
 
-    def __fft_tooth_counter(self, curve):
-        fft_points = np.array(curve)
+    def __fft_tooth_counter(self, fft_points):
 
         fft_result = np.fft.fft(fft_points)
         # ditch the positive fequency values (and the dc value) [first half of the 512 samples]
-        fft_result = fft_result[0:256]
+        fft_result = fft_result[0:512]
 
         # print("Hi!", fft_points)
         # fft_result[0] = 0
 
- #       plt.plot(list(range(0, len(fft_points))), fft_points)
- #       plt.show()
+#        plt.plot(list(range(0, len(fft_points))), fft_points)
+#        plt.show()
 
         # reduce to amplitudes
         fft_result = abs(fft_result)
@@ -108,23 +90,34 @@ class Gear:
 
         # ignore low peaks
         peak = np.max(fft_result)
-        if peak < 800:  # 1200
+        if peak < 85900: #140000:  # 54000
             raise NoGearFoundError(f"low FFT amplitude: {peak}")
 
         #print("max is: ", peak)
 
-        peaks = [(i, fft_result[i]) for i, item in enumerate(fft_result) if item > peak * 0.75]
+        peaks = [(i, fft_result[i]) for i, item in enumerate(fft_result) if item > peak * 0.9]
         peaks.sort(key=(lambda x: x[1]), reverse=True)
         if len(peaks) > 3: # main band with two side bands ok
             raise NoGearFoundError(f"too much noise {peaks}") # reject noisy results
 
+
+        #I know this seems horridly crude, but more often than not, its actually right.
+        c = peaks[0][0]
+        if len(peaks) > 1: 
+          c += peaks[1][0]
+        if len(peaks) > 2:  
+          c += peaks[2][0]
+          
+        self.count = c / len(peaks)    
+
+
         # inverse fft of the first 4 highest components
-        x = np.linspace(0, math.pi, num=1000, endpoint=False) # reconstruct @ 100 pts
-        y = np.cos(x * peaks[0][0]) * peaks[0][1]
-        if len(peaks) > 1:
-            y = y + np.cos(x * peaks[1][0]) * peaks[1][1]
-        if len(peaks) > 2:
-            y = y + np.cos(x * peaks[2][0]) * peaks[2][1]
+#        x = np.linspace(0, math.pi, num=1024, endpoint=False) # reconstruct @ 100 pts
+#        y = np.cos(x * peaks[0][0]) * peaks[0][1]
+#        if len(peaks) > 1:
+#            y = y + np.cos(x * peaks[1][0]) * peaks[1][1]
+#        if len(peaks) > 2:
+#            y = y + np.cos(x * peaks[2][0]) * peaks[2][1]
        # if len(peaks) > 3:
        #    y = y + np.cos(x * peaks[3][0]) * peaks[3][1]
 
@@ -133,12 +126,8 @@ class Gear:
 
         # find their number of zero-crossings
         # see https://kitchingroup.cheme.cmu.edu/blog/2013/02/27/Counting-roots/
-        self.count = (np.sum(y[0:-2] * y[1:-1] < 0))
+#        self.count = (np.sum(y[0:-2] * y[1:-1] < 0))/3
 
-        #teeths = list(polar>0)
-        #teeths = [i[0] for i in groupby(teeths)]
-        #if (teeths[0] == teeths[-1]): teeths.pop()
-        #toothCount = sum(teeths)
 
 
         #    print (">>> peaks are: ", fft_result[peaks] , "at", peaks, "<<<<")
@@ -179,7 +168,7 @@ class Gear:
         p0 = (self.center_x, self.center_y)
 
         cv2.circle(drawing, p0, int(self.radius), color, 3)  # circle along edge
-        cv2.circle(drawing, p0, int(self.radius)-14, color, 3)  # circle along edge
+        cv2.circle(drawing, p0, int(self.radius)-25, color, 3)  # circle along edge
         
         cv2.circle(drawing, p0, 20, color, -1)  # filled circle in middle
 
