@@ -1,6 +1,9 @@
 # gearcounter
 opencv software to count teeth on gears - python
 
+![ ](29-17_138.jpg)
+![ ](counts_29-17_138.jpg)
+
 
 This version uses two algorythms to count teeth:
 1) take the perimeter trace of the gear, convert it to polar, offset the resulting waveform by its average and count the zero crossings.
