@@ -42,21 +42,37 @@ known failures, not understood yet:
 (but the counter does NOT like lint!!!)
 
 03 35 should be 33 terrible perspective
+
 05 is a poor image, the fft isn't actually sure.
+
 07 left gear in excessive shadow
+
 18 not actually sure where the error comes from...
+
 25 inner gear too blurry?
+
 26 inner gear too blurry?
+
 31 no contrast from outter gear to background
+
 38 Hmmmm....
+
 41 Hmmm....
+
 42 Hmmm....
+
 53 Ghost eh?
+
 54 ghost.
+
 60 no contrast between inner gear and background
+
 65 is it the lint???
+
 67 awful perspective on the 36 tooth gears
+
 76 perim detection fail, this makes sense.
+
 78 WHY??? shadows??
 
 
