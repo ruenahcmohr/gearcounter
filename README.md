@@ -2,7 +2,7 @@
 opencv software to count teeth on gears - python
 
 ![ ](29-17_138.jpg)
-![ ](counts_29-17_138.jpg)
+![ ](count_29-17_138.jpg)
 
 
 This version uses two algorythms to count teeth:
